@@ -1,0 +1,10 @@
+{
+  "simpleString": "This is a simple string with no escape sequences",
+  "stringWithNewlines": "This string has\nnewlines\nin it",
+  "stringWithTabs": "This string has\ttabs\tin it",
+  "mixedEscapes": "This string has both\nnewlines and\ttabs",
+  "codeSnippet": "function helloWorld() {\n\tconsole.log(\"Hello, world!\");\n\treturn true;\n}",
+  "htmlExample": "<html>\n\t<head>\n\t\t<title>Sample Page</title>\n\t</head>\n\t<body>\n\t\t<h1>Hello World</h1>\n\t\t<p>This is a sample HTML page</p>\n\t</body>\n</html>",
+  "jsonExample": "{\n\t\"name\": \"John Doe\",\n\t\"age\": 30,\n\t\"isActive\": true,\n\t\"address\": {\n\t\t\"street\": \"123 Main St\",\n\t\t\"city\": \"Anytown\"\n\t}\n}",
+  "longString": "This is a very long string with many newlines\nto test scrolling behavior in the preview panel.\nLine 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\nLine 11\nLine 12\nLine 13\nLine 14\nLine 15\nLine 16\nLine 17\nLine 18\nLine 19\nLine 20"
+} 
