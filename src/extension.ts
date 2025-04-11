@@ -28,13 +28,24 @@ class EscapePreviewPanel {
 		const panel = vscode.window.createWebviewPanel(
 			EscapePreviewPanel.viewType,
 			'Escaped String Preview',
-			column || vscode.ViewColumn.One,
+			{
+				viewColumn: column || vscode.ViewColumn.Beside,
+				preserveFocus: true
+			},
 			{
 				enableScripts: true,
 				retainContextWhenHidden: true,
 				localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
 			}
 		);
+
+		// Set initial dimensions
+		const editor = vscode.window.activeTextEditor;
+		if (editor) {
+			const editorSize = editor.visibleRanges[0];
+			const height = Math.max(600, editorSize.end.line - editorSize.start.line);
+			// Note: This is a hint that might be ignored by VS Code
+		}
 
 		EscapePreviewPanel.currentPanel = new EscapePreviewPanel(panel, extensionUri);
 		EscapePreviewPanel.currentPanel.update(content, title);
@@ -81,37 +92,63 @@ class EscapePreviewPanel {
 			<meta name="viewport" content="width=device-width, initial-scale=1.0">
 			<title>Escaped String Preview</title>
 			<style>
+				:root {
+					--container-padding: 1rem;
+				}
+				html, body {
+					height: 100%;
+					width: 100%;
+					margin: 0;
+					padding: 0;
+					box-sizing: border-box;
+				}
 				body {
 					font-family: var(--vscode-editor-font-family);
 					background-color: var(--vscode-editor-background);
 					color: var(--vscode-editor-foreground);
-					padding: 10px;
-					overflow: auto;
+					padding: var(--container-padding);
+					display: flex;
+					flex-direction: column;
+					overflow: hidden;
+					min-height: 100vh;
 				}
 				.container {
-					max-height: 100%;
+					flex: 1;
 					overflow: auto;
 					white-space: pre-wrap;
 					word-wrap: break-word;
+					tab-size: 4;
+					-moz-tab-size: 4;
+					-o-tab-size: 4;
+					width: 100%;
+					box-sizing: border-box;
+					min-height: 70vh;
 				}
 				.code {
 					font-family: var(--vscode-editor-font-family);
 					font-size: var(--vscode-editor-font-size);
 					line-height: 1.5;
+					tab-size: 4;
+					-moz-tab-size: 4;
+					-o-tab-size: 4;
+					white-space: pre;
+					width: 100%;
 				}
 				.header {
-					padding-bottom: 10px;
+					padding-bottom: var(--container-padding);
 					border-bottom: 1px solid var(--vscode-panel-border);
-					margin-bottom: 10px;
+					margin-bottom: var(--container-padding);
 					display: flex;
 					justify-content: space-between;
 					align-items: center;
+					width: 100%;
+					box-sizing: border-box;
 				}
 				.btn {
 					background-color: var(--vscode-button-background);
 					color: var(--vscode-button-foreground);
 					border: none;
-					padding: 5px 10px;
+					padding: 0.5rem 1rem;
 					cursor: pointer;
 					border-radius: 2px;
 				}
@@ -254,17 +291,24 @@ function parseEscapeSequences(input: string): string {
 		return input;
 	}
 
-	// Process the escape sequences
-	return input.replace(/\\n/g, '\n')
-				.replace(/\\t/g, '\t')
-				.replace(/\\r/g, '\r');
+	// Using negative lookbehind to avoid replacing escaped backslashes
+	return input
+		.replace(/(?<!\\)\\n/g, '\n')
+		.replace(/(?<!\\)\\t/g, '\t')
+		.replace(/(?<!\\)\\r/g, '\r')
+		.replace(/(?<!\\)\\"/g, '"')
+		.replace(/(?<!\\)\\'/g, "'")
+		// After handling all escape sequences, replace double backslashes with single ones
+		.replace(/\\\\/g, '\\');
 }
 
 /**
  * Check if a string contains escape sequences that we support
  */
 function containsEscapeSequences(input: string): boolean {
-	return /\\[ntr]/.test(input);
+	// Check if there are any escape sequences that are not escaped backslashes
+	// Match any \ that is not preceded by another \, and is followed by one of our supported escape chars
+	return /(?<!\\)\\[ntr"']/.test(input);
 }
 
 /**
@@ -338,7 +382,7 @@ function isFileTypeEnabled(document: vscode.TextDocument): boolean {
 	
 	// Accept both with and without dot prefix
 	return config.enabledFileTypes.includes(fileExtension) || 
-	       config.enabledFileTypes.includes(`.${fileExtension}`);
+		config.enabledFileTypes.includes(`.${fileExtension}`);
 }
 
 /**
@@ -376,12 +420,14 @@ export function activate(context: vscode.ExtensionContext) {
 				// Parse the escape sequences
 				const parsedContent = parseEscapeSequences(stringContent);
 				
-				// Create a markdown string for the hover
+				// Create a markdown string for the hover with link at the top
 				const markdownContent = new vscode.MarkdownString();
-				markdownContent.appendMarkdown('### Escaped String Preview\n\n');
+				markdownContent.appendMarkdown('### Escaped String Preview ');
+				markdownContent.appendMarkdown(
+					'\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
+					encodeURIComponent(JSON.stringify([stringContent])) + ')'
+				);
 				markdownContent.appendCodeblock(parsedContent);
-				markdownContent.appendMarkdown('\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
-											   encodeURIComponent(JSON.stringify([stringContent])) + ')');
 				markdownContent.isTrusted = true;
 				
 				return new vscode.Hover(markdownContent, stringRange);
