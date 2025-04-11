@@ -3,7 +3,7 @@
   "displayName": "Escape Buster",
   "description": "Preview strings containing escape sequences like \\n, \\t, and \\r in JSON files, and other formats.",
   "version": "1.0.0",
-  "publisher": "Wentai Deng",
+  "publisher": "deng-wt",
   "repository": {
     "type": "git",
     "url": "https://github.com/Albert-Vanderboom/escape-buster"
@@ -23,10 +23,6 @@
     "preview",
     "format",
     "json"
-  ],
-  "activationEvents": [
-    "onLanguage:json",
-    "onCommand:escape-buster.previewEscapedString"
   ],
   "main": "./dist/extension.js",
   "contributes": {

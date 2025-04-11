@@ -334,9 +334,9 @@ export function activate(context: vscode.ExtensionContext) {
 				
 				// Create a markdown string for the hover with link at the top
 				const markdownContent = new vscode.MarkdownString();
-				markdownContent.appendMarkdown('### Escaped String Preview ');
+				markdownContent.appendMarkdown('### Escaped String Preview');
 				markdownContent.appendMarkdown('\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
-					encodeURIComponent(JSON.stringify([stringContent])) + ')');
+					encodeURIComponent(JSON.stringify([stringContent])) + ')\n\n');
 				
 				// Add language identifier if detected
 				if (language) {
