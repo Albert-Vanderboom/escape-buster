@@ -303,53 +303,99 @@ export function activate(context: vscode.ExtensionContext) {
 	// Add debug output for activation
 	vscode.window.showInformationMessage('EscapeBuster extension is now active!');
 
-	// Register the hover provider for each supported language
-	const supportedLanguages = ['json', 'javascript', 'typescript', 'c', 'cpp'];
+	// Get enabled file types from user configuration
+	const config = getConfiguration();
 	
-	const hoverProvider = vscode.languages.registerHoverProvider(
-		supportedLanguages,
-		{
-			provideHover(document, position, token) {
-				// Check if the file type is enabled in user settings
-				if (!isFileTypeEnabled(document)) {
-					return null;
-				}
-				
-				// Check if position is inside a string
-				const { isInString, stringRange, stringContent } = isPositionInString(document, position);
-				if (!isInString || !stringRange) {
-					return null;
-				}
-				
-				// Check if the string contains escape sequences
-				if (!containsEscapeSequences(stringContent)) {
-					return null;
-				}
-				
-				// Parse the escape sequences
-				const parsedContent = parseEscapeSequences(stringContent);
-				
-				// Detect language for syntax highlighting
-				const language = detectCodeLanguage(parsedContent);
-				
-				// Create a markdown string for the hover with link at the top
-				const markdownContent = new vscode.MarkdownString();
-				markdownContent.appendMarkdown('### Escaped String Preview');
-				markdownContent.appendMarkdown('\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
-					encodeURIComponent(JSON.stringify([stringContent])) + ')\n\n');
-				
-				// Add language identifier if detected
-				if (language) {
-					markdownContent.appendCodeblock(parsedContent, language);
-				} else {
-					markdownContent.appendCodeblock(parsedContent);
-				}
-				
-				markdownContent.isTrusted = true;
-				
-				return new vscode.Hover(markdownContent, stringRange);
-			}
+	// Setup configuration change listener to dynamically update hover providers
+	// when user changes enabledFileTypes setting
+	let currentHoverProvider: vscode.Disposable | undefined;
+	
+	// Function to register or re-register hover providers based on current config
+	function registerHoverProviders() {
+		// Dispose previous hover provider if exists
+		if (currentHoverProvider) {
+			currentHoverProvider.dispose();
 		}
+		
+		// Get current configuration
+		const currentConfig = getConfiguration();
+		
+		// Create document selectors for all enabled file types
+		const documentSelectors: vscode.DocumentFilter[] = [];
+		
+		for (const fileType of currentConfig.enabledFileTypes) {
+			// Handle file types with or without dot prefix
+			const fileExtension = fileType.startsWith('.') ? fileType.substring(1) : fileType;
+			
+			// Add document filter based on language ID
+			documentSelectors.push({ language: fileExtension });
+			
+			// Also add support for extension pattern (for files without registered language)
+			documentSelectors.push({ pattern: `**/*.${fileExtension}` });
+		}
+		
+		// Register hover provider for all enabled file types
+		currentHoverProvider = vscode.languages.registerHoverProvider(
+			documentSelectors,
+			{
+				provideHover(document, position, token) {
+					// Check if the file type is enabled in user settings
+					// This is now redundant but kept for double-checking
+					if (!isFileTypeEnabled(document)) {
+						return null;
+					}
+					
+					// Check if position is inside a string
+					const { isInString, stringRange, stringContent } = isPositionInString(document, position);
+					if (!isInString || !stringRange) {
+						return null;
+					}
+					
+					// Check if the string contains escape sequences
+					if (!containsEscapeSequences(stringContent)) {
+						return null;
+					}
+					
+					// Parse the escape sequences
+					const parsedContent = parseEscapeSequences(stringContent);
+					
+					// Detect language for syntax highlighting
+					const language = detectCodeLanguage(parsedContent);
+					
+					// Create a markdown string for the hover with link at the top
+					const markdownContent = new vscode.MarkdownString();
+					markdownContent.appendMarkdown('### Escaped String Preview');
+					markdownContent.appendMarkdown('\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
+						encodeURIComponent(JSON.stringify([stringContent])) + ')\n\n');
+					
+					// Add language identifier if detected
+					if (language) {
+						markdownContent.appendCodeblock(parsedContent, language);
+					} else {
+						markdownContent.appendCodeblock(parsedContent);
+					}
+					
+					markdownContent.isTrusted = true;
+					
+					return new vscode.Hover(markdownContent, stringRange);
+				}
+			}
+		);
+		
+		// Add to subscriptions for proper disposal
+		context.subscriptions.push(currentHoverProvider);
+	}
+	
+	// Initial registration
+	registerHoverProviders();
+	
+	// Listen for configuration changes
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('escapeBuster.enabledFileTypes')) {
+				registerHoverProviders();
+			}
+		})
 	);
 
 	// Register the command to open the preview panel
@@ -377,7 +423,6 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	context.subscriptions.push(hoverProvider);
 	context.subscriptions.push(previewCommand);
 }
 
