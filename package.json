@@ -1,24 +1,31 @@
 {
   "name": "escape-buster",
-  "displayName": "EscapeBuster",
-  "description": "Preview escaped strings (like '\\n' ,'\\t' ) in json and other formats.",
-  "version": "0.0.1",
-  "publisher": "yourPublisherId",
+  "displayName": "Escape Buster",
+  "description": "Preview strings containing escape sequences like \\n, \\t, and \\r in JSON files, and other formats.",
+  "version": "1.0.0",
+  "publisher": "Wentai Deng",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/escape-buster"
+    "url": "https://github.com/Albert-Vanderboom/escape-buster"
   },
   "license": "MIT",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.75.0"
   },
   "categories": [
-    "Other"
+    "Formatters",
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "string",
+    "escape sequences",
+    "preview",
+    "format",
+    "json"
   ],
   "activationEvents": [
     "onLanguage:json",
-    "onLanguage:javascript",
-    "onLanguage:typescript",
     "onCommand:escape-buster.previewEscapedString"
   ],
   "main": "./dist/extension.js",
@@ -30,7 +37,7 @@
       }
     ],
     "configuration": {
-      "title": "EscapeBuster",
+      "title": "Escape Buster",
       "properties": {
         "escapeBuster.enabledFileTypes": {
           "type": "array",
@@ -38,11 +45,11 @@
           "items": {
             "type": "string"
           },
-          "description": "File types where EscapeBuster should be active"
+          "description": "File types where Escape Buster should be active (e.g., json, js, ts, c, cpp)"
         },
         "escapeBuster.hoverDelay": {
           "type": "number",
-          "default": 300,
+          "default": 100,
           "description": "Delay in milliseconds before showing the preview"
         },
         "escapeBuster.enableAutoPreview": {
@@ -52,7 +59,7 @@
         },
         "escapeBuster.defaultPreviewHeight": {
           "type": "number",
-          "default": 300,
+          "default": 100,
           "description": "Default height for the preview panel in pixels"
         }
       }
@@ -69,8 +76,11 @@
     "lint": "eslint src",
     "test": "vscode-test"
   },
+  "dependencies": {
+    "highlight.js": "^11.9.0"
+  },
   "devDependencies": {
-    "@types/vscode": "^1.74.0",
+    "@types/vscode": "^1.75.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@typescript-eslint/eslint-plugin": "^8.28.0",

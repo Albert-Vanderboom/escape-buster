@@ -1,6 +1,22 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import hljs from 'highlight.js';
+import { generatePreviewHtml, escapeHtml, decodeHtmlEntities } from './webviewProvider';
+
+// Register common languages that we want to detect and highlight
+// This import is not needed when using the full highlight.js bundle
+// import 'highlight.js/lib/common';
+
+// Register additional languages as needed
+
+/**
+ * Format parsed content for consistent display in both hover and panel views
+ */
+function formatParsedContent(content: string, language: string | null): string {
+	// Ensure HTML is properly escaped for display
+	return escapeHtml(content);
+}
 
 /**
  * Represents a preview panel for escaped strings
@@ -74,119 +90,12 @@ class EscapePreviewPanel {
 	public update(content: string, title: string) {
 		const webview = this._panel.webview;
 		this._panel.title = title;
-		webview.html = this._getHtmlForWebview(webview, content);
-	}
-
-	private _getHtmlForWebview(webview: vscode.Webview, content: string): string {
-		// Try to detect if the content is code
-		const isCode = detectCodeLanguage(content);
-		const languageClass = isCode ? `language-${isCode}` : '';
 		
-		// Escape content for HTML rendering
-		const escapedContent = escapeHtml(content);
-
-		return `<!DOCTYPE html>
-		<html lang="en">
-		<head>
-			<meta charset="UTF-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<title>Escaped String Preview</title>
-			<style>
-				:root {
-					--container-padding: 1rem;
-				}
-				html, body {
-					height: 100%;
-					width: 100%;
-					margin: 0;
-					padding: 0;
-					box-sizing: border-box;
-				}
-				body {
-					font-family: var(--vscode-editor-font-family);
-					background-color: var(--vscode-editor-background);
-					color: var(--vscode-editor-foreground);
-					padding: var(--container-padding);
-					display: flex;
-					flex-direction: column;
-					overflow: hidden;
-					min-height: 100vh;
-				}
-				.container {
-					flex: 1;
-					overflow: auto;
-					white-space: pre-wrap;
-					word-wrap: break-word;
-					tab-size: 4;
-					-moz-tab-size: 4;
-					-o-tab-size: 4;
-					width: 100%;
-					box-sizing: border-box;
-					min-height: 70vh;
-				}
-				.code {
-					font-family: var(--vscode-editor-font-family);
-					font-size: var(--vscode-editor-font-size);
-					line-height: 1.5;
-					tab-size: 4;
-					-moz-tab-size: 4;
-					-o-tab-size: 4;
-					white-space: pre;
-					width: 100%;
-				}
-				.header {
-					padding-bottom: var(--container-padding);
-					border-bottom: 1px solid var(--vscode-panel-border);
-					margin-bottom: var(--container-padding);
-					display: flex;
-					justify-content: space-between;
-					align-items: center;
-					width: 100%;
-					box-sizing: border-box;
-				}
-				.btn {
-					background-color: var(--vscode-button-background);
-					color: var(--vscode-button-foreground);
-					border: none;
-					padding: 0.5rem 1rem;
-					cursor: pointer;
-					border-radius: 2px;
-				}
-				.btn:hover {
-					background-color: var(--vscode-button-hoverBackground);
-				}
-			</style>
-		</head>
-		<body>
-			<div class="header">
-				<h3>Escaped String Preview</h3>
-				<button class="btn" id="copyBtn">Copy to Clipboard</button>
-			</div>
-			<div class="container">
-				<pre class="code ${languageClass}">${escapedContent}</pre>
-			</div>
-			<script>
-				const copyBtn = document.getElementById('copyBtn');
-				const content = document.querySelector('.code');
-				
-				copyBtn.addEventListener('click', () => {
-					const range = document.createRange();
-					range.selectNode(content);
-					const selection = window.getSelection();
-					selection.removeAllRanges();
-					selection.addRange(range);
-					document.execCommand('copy');
-					selection.removeAllRanges();
-					
-					// Signal back to the extension
-					const vscode = acquireVsCodeApi();
-					vscode.postMessage({
-						command: 'copied'
-					});
-				});
-			</script>
-		</body>
-		</html>`;
+		// Detect language for syntax highlighting
+		const language = detectCodeLanguage(content);
+		
+		// Generate the HTML using the utility function
+		webview.html = generatePreviewHtml(content, language);
 	}
 
 	public dispose() {
@@ -312,52 +221,52 @@ function containsEscapeSequences(input: string): boolean {
 }
 
 /**
- * Escape HTML special characters
+ * Detect code language using highlight.js
  */
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
+function detectCodeLanguage(content: string): string | null {
+	// Skip detection for very short content
+	if (content.length < 10) {
+		return null;
+	}
+
+	try {
+		// Use highlight.js autodetection
+		const result = hljs.highlightAuto(content, [
+			'javascript', 'typescript', 'json', 
+			'html', 'xml', 'toml', 'yaml','css', 
+			'python', 'java', 'csharp', 'php', 'ruby', 'go', 'rust', 
+			'bash', 'shell', 'sql', 'c', 'cpp', 'text', 'markdown'
+		]);
+
+		// Check if there's a reliable detection
+		if (result.language && result.relevance > 5) {
+			return result.language;
+		}
+
+		// Return null if no reliable detection
+		return null;
+	} catch (error) {
+		console.error('Language detection error:', error);
+		return null;
+	}
 }
 
 /**
- * Simple code language detection based on content
+ * Highlight code using highlight.js
  */
-function detectCodeLanguage(content: string): string | null {
-	// Check for common language patterns
-	if (/^\s*<\!DOCTYPE html>|<html|<body|<head/.test(content)) {
-		return 'html';
+function highlightCode(content: string, language: string | null): string {
+	try {
+		if (language) {
+			// Only highlight if we have a detected language
+			return hljs.highlight(content, { language }).value;
+		} else {
+			// If no language detected, just return the original content
+			return content;
+		}
+	} catch (error) {
+		console.error('Syntax highlighting error:', error);
+		return content; // Return original content if highlighting fails
 	}
-	
-	if (/^\s*import\s+|export\s+|function\s+\w+\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|class\s+\w+/.test(content)) {
-		return 'javascript';
-	}
-	
-	if (/^\s*{[\s\n]*"/.test(content) || /^\s*\[[\s\n]*{/.test(content)) {
-		return 'json';
-	}
-	
-	if (/^\s*def\s+\w+\s*\(|import\s+\w+|class\s+\w+:/.test(content)) {
-		return 'python';
-	}
-	
-	if (/^\s*<\?php/.test(content)) {
-		return 'php';
-	}
-	
-	if (/^\s*<\?xml/.test(content)) {
-		return 'xml';
-	}
-	
-	if (/^\s*(public|private|protected)\s+class\s+/.test(content)) {
-		return 'java';
-	}
-	
-	// If no patterns match, return null
-	return null;
 }
 
 /**
@@ -395,7 +304,7 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.window.showInformationMessage('EscapeBuster extension is now active!');
 
 	// Register the hover provider for each supported language
-	const supportedLanguages = ['json', 'javascript', 'typescript'];
+	const supportedLanguages = ['json', 'javascript', 'typescript', 'c', 'cpp'];
 	
 	const hoverProvider = vscode.languages.registerHoverProvider(
 		supportedLanguages,
@@ -420,14 +329,22 @@ export function activate(context: vscode.ExtensionContext) {
 				// Parse the escape sequences
 				const parsedContent = parseEscapeSequences(stringContent);
 				
+				// Detect language for syntax highlighting
+				const language = detectCodeLanguage(parsedContent);
+				
 				// Create a markdown string for the hover with link at the top
 				const markdownContent = new vscode.MarkdownString();
 				markdownContent.appendMarkdown('### Escaped String Preview ');
-				markdownContent.appendMarkdown(
-					'\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
-					encodeURIComponent(JSON.stringify([stringContent])) + ')'
-				);
-				markdownContent.appendCodeblock(parsedContent);
+				markdownContent.appendMarkdown('\n\n[Open in Preview Panel](command:escape-buster.previewEscapedString?' + 
+					encodeURIComponent(JSON.stringify([stringContent])) + ')');
+				
+				// Add language identifier if detected
+				if (language) {
+					markdownContent.appendCodeblock(parsedContent, language);
+				} else {
+					markdownContent.appendCodeblock(parsedContent);
+				}
+				
 				markdownContent.isTrusted = true;
 				
 				return new vscode.Hover(markdownContent, stringRange);
@@ -452,7 +369,11 @@ export function activate(context: vscode.ExtensionContext) {
 		
 		if (stringContent) {
 			const parsedContent = parseEscapeSequences(stringContent);
-			EscapePreviewPanel.createOrShow(context.extensionUri, parsedContent, 'Escaped String Preview');
+			// Use the same language detection as the hover preview
+			const language = detectCodeLanguage(parsedContent);
+			// Create a title that includes the language if detected
+			const title = language ? `Escaped String Preview (${language})` : 'Escaped String Preview';
+			EscapePreviewPanel.createOrShow(context.extensionUri, parsedContent, title);
 		}
 	});
 
