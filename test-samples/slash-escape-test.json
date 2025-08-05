@@ -1,0 +1,8 @@
+{
+  "normalSlash": "https://example.com/api/data",
+  "escapedSlash": "https:\/\/example.com\/api\/data",
+  "mixedContent": "Visit https:\/\/example.com for more info\nOr try http:\/\/localhost:3000\/dashboard",
+  "pathExample": "\/home\/user\/documents\/file.txt",
+  "urlWithQuery": "https:\/\/api.example.com\/v1\/users?page=1&limit=10",
+  "jsonString": "{\"url\": \"https:\/\/example.com\", \"path\": \"\/api\/v1\"}"
+}

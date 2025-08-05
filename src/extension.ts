@@ -207,6 +207,7 @@ function parseEscapeSequences(input: string): string {
 		.replace(/(?<!\\)\\r/g, '\r')
 		.replace(/(?<!\\)\\"/g, '"')
 		.replace(/(?<!\\)\\'/g, "'")
+		.replace(/(?<!\\)\\\//g, '/')  // Handle escaped forward slash (JSON spec)
 		// After handling all escape sequences, replace double backslashes with single ones
 		.replace(/\\\\/g, '\\');
 }
@@ -217,7 +218,7 @@ function parseEscapeSequences(input: string): string {
 function containsEscapeSequences(input: string): boolean {
 	// Check if there are any escape sequences that are not escaped backslashes
 	// Match any \ that is not preceded by another \, and is followed by one of our supported escape chars
-	return /(?<!\\)\\[ntr"']/.test(input);
+	return /(?<!\\)\\[ntr"'\/]/.test(input);
 }
 
 /**

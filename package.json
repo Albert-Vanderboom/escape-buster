@@ -2,7 +2,7 @@
   "name": "escape-buster",
   "displayName": "Escape Buster",
   "description": "Preview strings containing escape sequences like \\n, \\t, and \\r in JSON files, and other formats.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "deng-wt",
   "icon": "image/icon/icon.png",
   "repository": {

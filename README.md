@@ -34,6 +34,7 @@ Escape Buster is a VS Code extension that provides a convenient way to preview s
 - `\r` - Carriage return
 - `\"` - Double quote
 - `\'` - Single quote
+- `\/` - Forward slash
 - `\\` - Backslash
 
 ## Configuration
@@ -75,6 +76,10 @@ Initial release of Escape Buster:
 - Preview strings with escape sequences on hover
 - Dedicated preview panel with "Copy to Clipboard" functionality
 - Code detection and syntax highlighting for multiple languages
+
+### 1.0.1
+
+- Add supportng for escaped-slash `\/`
 
 ## Contributing
 
