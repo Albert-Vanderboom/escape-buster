@@ -62,6 +62,12 @@
           "default": 100,
           "description": "Default height for the preview panel in pixels"
         }
+        },
+        "escapeBuster.treatDoubleAsSingleBackslashes": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, interprets double-backslash character sequences (e.g., \\n) as single backslash escape sequences (e.g., \n) in string previews."
+        }
       }
     }
   },

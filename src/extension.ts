@@ -200,16 +200,33 @@ function parseEscapeSequences(input: string): string {
 		return input;
 	}
 
-	// Using negative lookbehind to avoid replacing escaped backslashes
-	return input
-		.replace(/(?<!\\)\\n/g, '\n')
-		.replace(/(?<!\\)\\t/g, '\t')
-		.replace(/(?<!\\)\\r/g, '\r')
-		.replace(/(?<!\\)\\"/g, '"')
-		.replace(/(?<!\\)\\'/g, "'")
-		.replace(/(?<!\\)\\\//g, '/')  // Handle escaped forward slash (JSON spec)
-		// After handling all escape sequences, replace double backslashes with single ones
-		.replace(/\\\\/g, '\\');
+	const config = getConfiguration();
+	if (config.treatDoubleAsSingleBackslashes) {
+		// Replace double-backslash escape sequences (e.g., \\n) with single-backslash equivalents (e.g., \n)
+		return input.replace(/\\\\([ntr"'\/\\])/g, (m, c) => {
+			switch (c) {
+				case 'n': return '\n';
+				case 't': return '\t';
+				case 'r': return '\r';
+				case '"': return '"';
+				case "'": return "'";
+				case '/': return '/';
+				case '\\': return '\\';
+				default: return m;
+			}
+		});
+	} else {
+		// Using negative lookbehind to avoid replacing escaped backslashes
+		return input
+			.replace(/(?<!\\)\\n/g, '\n')
+			.replace(/(?<!\\)\\t/g, '\t')
+			.replace(/(?<!\\)\\r/g, '\r')
+			.replace(/(?<!\\)\\"/g, '"')
+			.replace(/(?<!\\)\\'/g, "'")
+			.replace(/(?<!\\)\\\//g, '/')  // Handle escaped forward slash (JSON spec)
+			// After handling all escape sequences, replace double backslashes with single ones
+			.replace(/\\\\/g, '\\');
+	}
 }
 
 /**
@@ -280,6 +297,7 @@ function getConfiguration() {
 		hoverDelay: config.get<number>('hoverDelay') || 300,
 		enableAutoPreview: config.get<boolean>('enableAutoPreview') || true,
 		defaultPreviewHeight: config.get<number>('defaultPreviewHeight') || 300
+		treatDoubleAsSingleBackslashes: config.get<boolean>('treatDoubleAsSingleBackslashes') || false
 	};
 }
 
