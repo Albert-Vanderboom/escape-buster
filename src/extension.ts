@@ -117,8 +117,12 @@ class EscapePreviewPanel {
 							escapeMap = buildEscapeStyleMap(stringContent);
 						}
 					}
-					// Fallback: use the last content shown in the panel if not found
-					const resolvedString = parseEscapeSequences(originalString || this._panel.webview.html || '', originalString);
+					// Only proceed if we have a string to edit
+					if (!originalString) {
+						vscode.window.showWarningMessage('No string detected at the cursor to edit.');
+						return;
+					}
+					const resolvedString = parseEscapeSequences(originalString, originalString);
 					const doc = await vscode.workspace.openTextDocument({ content: resolvedString, language: 'plaintext' });
 					await vscode.window.showTextDocument(doc, { preview: false });
 					// Store context for later replacement (could use a WeakMap or global state)
