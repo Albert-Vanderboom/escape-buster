@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import hljs from 'highlight.js';
 import { generatePreviewHtml, escapeHtml, decodeHtmlEntities } from './webviewProvider';
 
@@ -489,7 +490,6 @@ function isFileTypeEnabled(document: vscode.TextDocument): boolean {
 export function activate(context: vscode.ExtensionContext) {
 	// On activation, clean up any leftover temp folder
 	try {
-		const os = require('os');
 		const tempDir = path.join(os.homedir(), 'escape-buster-tmp');
 		if (fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -586,7 +586,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			const resolvedString = parseEscapeSequences(originalString, originalString);
 			// Store temp file in the user's home directory under escape-buster-tmp
-			const os = require('os');
+			
 			let baseDir = path.join(os.homedir(), 'escape-buster-tmp');
 			try {
 				if (!fs.existsSync(baseDir)) {
@@ -1103,3 +1103,4 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
 	// Clean-up code if needed
 }
+
