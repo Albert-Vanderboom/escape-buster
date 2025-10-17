@@ -510,23 +510,54 @@ export function activate(context: vscode.ExtensionContext) {
 			let escapeMap: Record<string, 'single-escaped' | 'double-escaped'> = {};
 			let hoverLine: number | undefined = undefined;
 			let hoverCharacter: number | undefined = undefined;
+			let sourceDocumentUri: string | undefined = undefined;
+			
 			if (arg && typeof arg === 'object' && arg.stringContent !== undefined && typeof arg.hoverLine === 'number' && typeof arg.hoverCharacter === 'number') {
 				// Called from hover, with explicit mouse position
 				originalString = arg.stringContent;
 				hoverLine = arg.hoverLine;
 				hoverCharacter = arg.hoverCharacter;
-				// Try to get stringRange if possible
-				if (
-					typeof hoverLine === 'number' &&
-					typeof hoverCharacter === 'number' &&
-					editor && editor.document.uri.toString() === (editor?.document.uri.toString())
-				) {
-					const lineText = editor.document.lineAt(hoverLine).text;
-					const idx = lineText.indexOf(originalString);
-					if (idx !== -1) {
-						stringRange = new vscode.Range(new vscode.Position(hoverLine, idx), new vscode.Position(hoverLine, idx + originalString.length));
-					}
+				sourceDocumentUri = arg.documentUri; // Capture the source document URI from hover args
+				
+				// Try to get stringRange - first check if we can use the current active editor
+				let sourceDoc: vscode.TextDocument | undefined = undefined;
+				if (editor && arg.documentUri && editor.document.uri.toString() === arg.documentUri) {
+					sourceDoc = editor.document;
+				} else if (arg.documentUri) {
+					// If active editor doesn't match, search for the document in all open documents
+					sourceDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === arg.documentUri);
 				}
+				
+				if (sourceDoc && typeof hoverLine === 'number' && typeof hoverCharacter === 'number') {
+					try {
+						const lineText = sourceDoc.lineAt(hoverLine).text;
+						// Search for the string occurrence that contains the hover position
+						let idx = -1;
+						while (true) {
+							idx = lineText.indexOf(originalString, idx + 1);
+							if (idx === -1) {
+								break;
+							}
+							// Check if hoverCharacter is within this occurrence
+							if (hoverCharacter >= idx && hoverCharacter <= idx + originalString.length) {
+								stringRange = new vscode.Range(
+									new vscode.Position(hoverLine, idx),
+									new vscode.Position(hoverLine, idx + originalString.length)
+								);
+								console.log('[EscapeBuster] Found stringRange from hover:', stringRange);
+								break;
+							}
+						}
+						if (!stringRange) {
+							console.warn('[EscapeBuster] Could not find string occurrence at hover position');
+						}
+					} catch (err) {
+						console.error('[EscapeBuster] Error finding stringRange:', err);
+					}
+				} else {
+					console.warn('[EscapeBuster] Source document not found for URI:', arg.documentUri);
+				}
+				
 				// Determine escape style - check if it has double-escaped sequences
 				escapeStyle = /\\\\[ntr"'\\/]/.test(originalString) ? 'double-escaped' : 'single-escaped';
 				escapeMap = buildEscapeStyleMap(originalString);
@@ -598,12 +629,24 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showErrorMessage('Escape Buster: Failed to show temp file in editor: ' + err);
 				return;
 			}
+			
+			// Use sourceDocumentUri if available (from hover), otherwise use the editor's document
+			const finalDocumentUri = sourceDocumentUri || editor?.document.uri.toString();
+			
+			console.log('[EscapeBuster] Setting up edit context:', {
+				documentUri: finalDocumentUri,
+				stringRange: stringRange ? `${stringRange.start.line}:${stringRange.start.character}-${stringRange.end.line}:${stringRange.end.character}` : 'undefined',
+				originalString: originalString.substring(0, 50) + '...',
+				hoverLine,
+				hoverCharacter
+			});
+			
 			(globalThis as any)._escapeBusterEditContext = {
 				originalString,
 				stringRange,
 				escapeStyle,
 				escapeMap,
-				documentUri: editor?.document.uri.toString(),
+				documentUri: finalDocumentUri,
 				tempFilePath: realTempFilePath,
 				wasSaved: false,
 				hoverLine,
@@ -617,29 +660,76 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(editAsMultilineCommand);
 
 	// When the temp file is saved, immediately take over the change into the original file as string
-	vscode.workspace.onDidSaveTextDocument(async (doc) => {
+	// Store the disposable to prevent memory leaks
+	const onSaveDisposable = vscode.workspace.onDidSaveTextDocument(async (doc) => {
 		const ctx = (globalThis as any)._escapeBusterEditContext;
+		console.log('[EscapeBuster] onSaveTextDocument triggered:', doc.uri.fsPath);
+		
 		if (!ctx || !ctx.tempFilePath) {
+			console.log('[EscapeBuster] No context or tempFilePath:', { hasContext: !!ctx, tempFilePath: ctx?.tempFilePath });
 			return;
 		}
-		let docPath = doc.uri.fsPath;
-		try { 
-			docPath = fs.realpathSync(docPath); 
-		} catch { 
-			// Ignore error
+		
+		// Use VS Code's URI handling for reliable cross-platform path comparison
+		// This automatically handles case-sensitivity based on the file system
+		let tempPath = ctx.tempFilePath;
+		try {
+			// Resolve symlinks to get the real path
+			tempPath = fs.realpathSync(tempPath);
+		} catch {
+			// Use original path if realpath fails
 		}
-		if (docPath !== ctx.tempFilePath) {
+		
+		const tempUri = vscode.Uri.file(tempPath);
+		const pathsMatch = doc.uri.toString() === tempUri.toString();
+		
+		console.log('[EscapeBuster] Comparing paths:', { 
+			docUri: doc.uri.toString(), 
+			tempUri: tempUri.toString(), 
+			pathsMatch
+		});
+		
+		if (!pathsMatch) {
 			return;
 		}
+		
 		const editedText = doc.getText();
+		console.log('[EscapeBuster] Edited text length:', editedText.length);
 		// Only update if the edited text is different from the original string
 		let stringRange = ctx.stringRange;
+		
+		console.log('[EscapeBuster] Initial stringRange:', stringRange ? `${stringRange.start.line}:${stringRange.start.character}-${stringRange.end.line}:${stringRange.end.character}` : 'undefined');
+		
 		// If stringRange is missing, search for the original string in the correct line and character
 		if (!stringRange && ctx.documentUri && typeof ctx.originalString === 'string' && typeof ctx.hoverLine === 'number' && typeof ctx.hoverCharacter === 'number') {
-			// Find the original document in all open text documents
+			console.log('[EscapeBuster] Attempting to reconstruct stringRange...');
+			console.log('[EscapeBuster] Search params:', {
+				documentUri: ctx.documentUri,
+				hoverLine: ctx.hoverLine,
+				hoverCharacter: ctx.hoverCharacter,
+				originalStringLength: ctx.originalString.length
+			});
+			
+			// Try to find the document in open documents first, then open it if needed
 			let origDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === ctx.documentUri);
+			
+			if (!origDoc) {
+				// Document not open, try to open it
+				try {
+					const uri = vscode.Uri.parse(ctx.documentUri);
+					origDoc = await vscode.workspace.openTextDocument(uri);
+					console.log('[EscapeBuster] Opened original document:', uri.toString());
+				} catch (err) {
+					console.error('[EscapeBuster] Failed to open original document:', err);
+				}
+			} else {
+				console.log('[EscapeBuster] Found original document in open editors');
+			}
+			
 			if (origDoc) {
 				const lineText = origDoc.lineAt(ctx.hoverLine).text;
+				console.log('[EscapeBuster] Line text:', lineText);
+				
 				const searchStr = ctx.originalString;
 				let idx = -1;
 				let foundRange: vscode.Range | undefined = undefined;
@@ -649,37 +739,92 @@ export function activate(context: vscode.ExtensionContext) {
 					if (idx === -1) {
 						break;
 					}
+					console.log('[EscapeBuster] Found occurrence at index:', idx);
 					// If hoverCharacter is within this occurrence, use it
 					if (ctx.hoverCharacter >= idx && ctx.hoverCharacter <= idx + searchStr.length) {
 						const start = new vscode.Position(ctx.hoverLine, idx);
 						const end = new vscode.Position(ctx.hoverLine, idx + searchStr.length);
 						foundRange = new vscode.Range(start, end);
+						console.log('[EscapeBuster] ✅ Reconstructed stringRange:', foundRange);
 						break;
 					}
 				}
 				if (foundRange) {
 					stringRange = foundRange;
+				} else {
+					console.error('[EscapeBuster] ❌ Failed to reconstruct stringRange - no matching occurrence found');
 				}
 			}
 		}
+		// Update the original document if we have all required information
+		// Always attempt to update when saved, regardless of whether content changed
+		console.log('[EscapeBuster] Checking update conditions:', {
+			hasEditedText: editedText !== undefined,
+			hasDocumentUri: !!ctx.documentUri,
+			documentUri: ctx.documentUri,
+			hasStringRange: !!stringRange,
+			stringRange: stringRange ? `${stringRange.start.line}:${stringRange.start.character}-${stringRange.end.line}:${stringRange.end.character}` : 'undefined',
+			hasOriginalString: typeof ctx.originalString === 'string'
+		});
+		
 		if (
-			editedText &&
+			editedText !== undefined &&
 			ctx.documentUri &&
 			stringRange &&
-			typeof ctx.originalString === 'string' &&
-			editedText !== parseEscapeSequences(ctx.originalString, ctx.originalString)
+			typeof ctx.originalString === 'string'
 		) {
-			// Find the original document in all open text documents
-			let origDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === ctx.documentUri);
+			// Parse the stored URI string back to a URI object for proper comparison
+			const targetUri = vscode.Uri.parse(ctx.documentUri);
+			
+			// Find the original document using fsPath comparison (more reliable than URI string comparison)
+			console.log('[EscapeBuster] Looking for document:', {
+				targetUri: targetUri.toString(),
+				targetFsPath: targetUri.fsPath
+			});
+			
+			let origDoc = vscode.workspace.textDocuments.find(d => {
+				// Compare using fsPath and URI toString() for better compatibility
+				const uriMatch = d.uri.toString() === targetUri.toString();
+				const fsPathMatch = d.uri.fsPath === targetUri.fsPath;
+				return uriMatch || fsPathMatch;
+			});
+			
+			if (!origDoc) {
+				// Try opening the document if not found
+				try {
+					origDoc = await vscode.workspace.openTextDocument(targetUri);
+					console.log('[EscapeBuster] ✅ Opened original document');
+				} catch (err) {
+					console.error('[EscapeBuster] ❌ Failed to open original document:', err);
+				}
+			} else {
+				console.log('[EscapeBuster] ✅ Found original document in open editors');
+			}
+			
 			if (origDoc) {
+				console.log('[EscapeBuster] Found original document, showing editor...');
 				// Show the document in an editor
 				const origEditor = await vscode.window.showTextDocument(origDoc, { preview: false, preserveFocus: true });
+				// Convert the edited text back to escaped format and replace
+				const escapedString = multiLineToEscapedString(editedText, ctx.escapeStyle, ctx.escapeMap, ctx.originalString);
+				console.log('[EscapeBuster] Escaped string:', escapedString.substring(0, 100) + '...');
+				console.log('[EscapeBuster] Replacing at range:', stringRange);
+				
 				await origEditor.edit(editBuilder => {
-					editBuilder.replace(stringRange, multiLineToEscapedString(editedText, ctx.escapeStyle, ctx.escapeMap, ctx.originalString));
+					editBuilder.replace(stringRange, escapedString);
 				});
+				console.log('[EscapeBuster] ✅ Successfully updated original document');
+			} else {
+				console.error('[EscapeBuster] ❌ Could not find the original document to update');
+				vscode.window.showWarningMessage('Escape Buster: Could not find the original document to update.');
 			}
-		} else if (!stringRange) {
-			vscode.window.showWarningMessage('Escape Buster: Could not determine string range for replacement.');
+		} else {
+			console.error('[EscapeBuster] ❌ Missing required information for update');
+			if (!stringRange) {
+				vscode.window.showWarningMessage('Escape Buster: Could not determine string range for replacement.');
+			} else if (!ctx.documentUri) {
+				vscode.window.showWarningMessage('Escape Buster: Missing document URI for replacement.');
+			}
 		}
 		ctx.wasSaved = true;
 		ctx.lastSavedText = editedText;
@@ -695,9 +840,13 @@ export function activate(context: vscode.ExtensionContext) {
 			console.log('[EscapeBuster] Could not close String Editor tab:', err);
 		}
 	});
+	
+	// Add the save listener to subscriptions to prevent memory leaks
+	context.subscriptions.push(onSaveDisposable);
 
 	// On tab close, delete the temp file and clear context. Only update original if file was saved.
-	vscode.window.onDidChangeVisibleTextEditors(async (editors) => {
+	// Store the disposable to prevent memory leaks
+	const onChangeEditorsDisposable = vscode.window.onDidChangeVisibleTextEditors(async (editors) => {
 		const ctx = (globalThis as any)._escapeBusterEditContext;
 		if (!ctx || !ctx.tempFilePath) {
 			return;
@@ -752,6 +901,9 @@ export function activate(context: vscode.ExtensionContext) {
 			(globalThis as any)._escapeBusterEditContext = undefined;
 		}
 	});
+	
+	// Add the editor change listener to subscriptions to prevent memory leaks
+	context.subscriptions.push(onChangeEditorsDisposable);
 
 	/**
 	 * Convert multi-line text back to an escaped string for insertion into source code.
@@ -870,16 +1022,18 @@ export function activate(context: vscode.ExtensionContext) {
 					// Detect language for syntax highlighting
 					const language = detectCodeLanguage(parsedContent);
 
-					// Create a markdown string for the hover with links at the top
-					const markdownContent = new vscode.MarkdownString();
-					markdownContent.appendMarkdown('### Escaped String Preview');
-					// Pass stringContent, line, and character to the command as an object
-					const hoverArgs = {
-						stringContent,
-						hoverLine: position.line,
-						hoverCharacter: position.character
-					};
-					markdownContent.appendMarkdown(
+				// Create a markdown string for the hover with links at the top
+				const markdownContent = new vscode.MarkdownString();
+				markdownContent.appendMarkdown('### Escaped String Preview');
+				// Pass stringContent, line, character, and documentUri to the command as an object
+				// documentUri is needed to verify the operation is on the correct source file
+				const hoverArgs = {
+					stringContent,
+					hoverLine: position.line,
+					hoverCharacter: position.character,
+					documentUri: document.uri.toString()
+				};
+				markdownContent.appendMarkdown(
 						'\n\n[Show in Preview Panel](command:escape-buster.previewEscapedString?' +
 						encodeURIComponent(JSON.stringify([stringContent])) +
 						')  |  [Edit as Multi-line](command:escape-buster.editAsMultiline?' +
