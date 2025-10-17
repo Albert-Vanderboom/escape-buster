@@ -4,6 +4,8 @@ All notable changes to the "escape-buster" extension will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
+## [1.1.0] - Support for multi-line editing of escape-busted strings
 
-- Initial release
+## [1.0.1] - Add supportng for escaped-slash `\/`
+
+## [1.0.1] - Initial Release
