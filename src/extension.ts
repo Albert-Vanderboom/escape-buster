@@ -7,6 +7,10 @@ import * as os from 'os';
 import hljs from 'highlight.js';
 import { generatePreviewHtml, escapeHtml, decodeHtmlEntities } from './webviewProvider';
 
+// Cache the temporary directory path at module load time to ensure consistency
+// This prevents issues if os.tmpdir() returns different values during runtime
+const TEMP_DIR = path.join(os.tmpdir(), 'escape-buster-tmp');
+
 // Register common languages that we want to detect and highlight
 // This import is not needed when using the full highlight.js bundle
 // import 'highlight.js/lib/common';
@@ -485,12 +489,20 @@ function isFileTypeEnabled(document: vscode.TextDocument): boolean {
 }
 
 /**
+ * Get the temporary directory path for this extension
+ * Returns the cached path to ensure consistency across all operations
+ */
+function getTempDirectory(): string {
+	return TEMP_DIR;
+}
+
+/**
  * This method is called when your extension is activated
  */
 export function activate(context: vscode.ExtensionContext) {
 	// On activation, clean up any leftover temp folder
 	try {
-		const tempDir = path.join(os.homedir(), 'escape-buster-tmp');
+		const tempDir = getTempDirectory();
 		if (fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 			console.log('[EscapeBuster] Cleaned up leftover temp folder:', tempDir);
@@ -585,9 +597,9 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 			}
 			const resolvedString = parseEscapeSequences(originalString, originalString);
-			// Store temp file in the user's home directory under escape-buster-tmp
+			// Store temp file in the system's temporary directory under escape-buster-tmp
 			
-			let baseDir = path.join(os.homedir(), 'escape-buster-tmp');
+			let baseDir = getTempDirectory();
 			try {
 				if (!fs.existsSync(baseDir)) {
 					fs.mkdirSync(baseDir, { recursive: true });

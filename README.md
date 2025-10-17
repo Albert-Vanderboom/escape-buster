@@ -81,6 +81,10 @@ Initial release of Escape Buster:
 
 - Add supportng for escaped-slash `\/`
 
+### 1.1.0
+
+- Support for multi-line editing of escape-busted strings
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
