@@ -20,22 +20,66 @@ function formatParsedContent(content: string, language: string | null): string {
 	return escapeHtml(content);
 }
 
-// Helper to build a map of escape styles for each special character
-function buildEscapeStyleMap(str: string): Record<string, 'unescaped' | 'escaped'> {
-	const map: Record<string, 'unescaped' | 'escaped'> = {};
-	const specials = [
-		{ char: '\n', unescaped: /(^|[^\\])\n/, dbl: /\\n/ },
-		{ char: '\r', unescaped: /(^|[^\\])\r/, dbl: /\\r/ },
-		{ char: '\t', unescaped: /(^|[^\\])\t/, dbl: /\\t/ },
-		{ char: '"', unescaped: /(^|[^\\])"/, dbl: /\\"/ },
-		{ char: "'", unescaped: /(^|[^\\])'/, dbl: /\\'/ },
-		{ char: '\\', unescaped: /(^|[^\\])\\(?![nrt"'\/])/, dbl: /\\\\/ },
-		{ char: '\/', unescaped: /(^|[^\\])\//, dbl: /\\\// },
-	];
-	for (const { char, unescaped, dbl } of specials) {
-		if (dbl.test(str)) map[char] = 'escaped';
-		else if (unescaped.test(str)) map[char] = 'unescaped';
+/**
+ * Build a map to determine the escape style for each special character in the string.
+ * The map keys are the actual characters (e.g., '\n', '/', '\\'), and values indicate
+ * whether they should be encoded as single-backslash ('\n') or double-backslash ('\\n').
+ * 
+ * Strategy:
+ * - If we find double-backslash sequences like '\\n', '\\/', we mark those as 'double-escaped'
+ * - If we find single-backslash sequences like '\n', '\/', we mark those as 'single-escaped'
+ * - This helps preserve the original escape style when converting back
+ */
+function buildEscapeStyleMap(str: string): Record<string, 'single-escaped' | 'double-escaped'> {
+	const map: Record<string, 'single-escaped' | 'double-escaped'> = {};
+	
+	// Check for double-backslash escape sequences (\\n, \\t, \\/, etc.)
+	// These appear in the source as four characters: \ \ n or \ \ /
+	if (/\\\\n/.test(str)) {
+		map['\n'] = 'double-escaped';
 	}
+	if (/\\\\r/.test(str)) {
+		map['\r'] = 'double-escaped';
+	}
+	if (/\\\\t/.test(str)) {
+		map['\t'] = 'double-escaped';
+	}
+	if (/\\\\['"]/.test(str)) {
+		map['"'] = 'double-escaped';
+		map["'"] = 'double-escaped';
+	}
+	if (/\\\\\\\\/.test(str)) {
+		map['\\'] = 'double-escaped';
+	}
+	if (/\\\\\//g.test(str)) {
+		map['/'] = 'double-escaped';
+	}
+	
+	// Check for single-backslash escape sequences (\n, \t, \/, etc.)
+	// These appear in the source as two characters: \ n or \ /
+	// Only mark as single-escaped if not already marked as double-escaped
+	if (!map['\n'] && /\\n/.test(str)) {
+		map['\n'] = 'single-escaped';
+	}
+	if (!map['\r'] && /\\r/.test(str)) {
+		map['\r'] = 'single-escaped';
+	}
+	if (!map['\t'] && /\\t/.test(str)) {
+		map['\t'] = 'single-escaped';
+	}
+	if (!map['"'] && /\\"/.test(str)) {
+		map['"'] = 'single-escaped';
+	}
+	if (!map["'"] && /\\'/.test(str)) {
+		map["'"] = 'single-escaped';
+	}
+	if (!map['\\'] && /\\\\/.test(str)) {
+		map['\\'] = 'single-escaped';
+	}
+	if (!map['/'] && /\\\//.test(str)) {
+		map['/'] = 'single-escaped';
+	}
+	
 	return map;
 }
 
@@ -104,16 +148,16 @@ class EscapePreviewPanel {
 					const editor = vscode.window.activeTextEditor;
 					let originalString = '';
 					let stringRange: vscode.Range | undefined;
-					let escapeStyle: 'unescaped' | 'escaped' = 'unescaped';
-					let escapeMap: Record<string, 'unescaped' | 'escaped'> = {};
+					let escapeStyle: 'single-escaped' | 'double-escaped' = 'single-escaped';
+					let escapeMap: Record<string, 'single-escaped' | 'double-escaped'> = {};
 					if (editor) {
 						const position = editor.selection.active;
 						const { isInString, stringRange: range, stringContent } = isPositionInString(editor.document, position);
 						if (isInString && range) {
 							originalString = stringContent;
 							stringRange = range;
-							// Determine escape style
-							escapeStyle = /\\\\[ntr"'\\/]/.test(stringContent) ? 'escaped' : 'unescaped';
+							// Determine escape style - check if it has double-escaped sequences
+							escapeStyle = /\\\\[ntr"'\\/]/.test(stringContent) ? 'double-escaped' : 'single-escaped';
 							escapeMap = buildEscapeStyleMap(stringContent);
 						}
 					}
@@ -262,60 +306,97 @@ function isPositionInString(document: vscode.TextDocument, position: vscode.Posi
 
 /**
  * Convert escape sequences in a string to their real character representations for the multi-line editor.
- * Handles the following logic:
- * - If only escaped backslash escapes: convert escaped backslash sequences to real characters.
- * - If only unescaped backslash escapes: convert unescaped backslash sequences to real characters.
- * - If both: only convert unescaped backslash escapes, leave escaped backslash as literal text.
- * @param input The string to convert (the string content)
- * @param original The original string (to detect escape style)
+ * This function decodes string literals (as they appear in source code) into actual characters.
+ * 
+ * Examples:
+ * - Input: "hello\\nworld" (source with \n) -> Output: "hello\nworld" (actual newline)
+ * - Input: "url\\/path" (source with \/) -> Output: "url/path" (actual slash)
+ * - Input: "double\\\\n" (source with \\n) -> Output: "double\\n" (literal \n text)
+ * 
+ * @param input The string to convert (the string content as it appears in source)
+ * @param original The original string (to detect escape style from the source)
  */
 function parseEscapeSequences(input: string, original?: string): string {
 	if (!input.includes('\\')) {
 		return input;
 	}
+	
 	// Build a map of escape styles for each special character sequence in the original string
 	const escapeMap = original ? buildEscapeStyleMap(original) : {};
-	// If no escapeMap, fallback to original logic
+	
+	// If no escapeMap provided, fallback: treat all as single-escaped
 	if (!original) {
-		// fallback: treat as unescaped
 		return input
-			.replace(/(?<!\\)\\n/g, '\n')
-			.replace(/(?<!\\)\\t/g, '\t')
-			.replace(/(?<!\\)\\r/g, '\r')
-			.replace(/(?<!\\)\\"/g, '"')
-			.replace(/(?<!\\)\\'/g, "'")
-			.replace(/(?<!\\)\\\\/g, '\\')
-			.replace(/(?<!\\)\\\//g, '/');
+			.replace(/\\n/g, '\n')
+			.replace(/\\t/g, '\t')
+			.replace(/\\r/g, '\r')
+			.replace(/\\"/g, '"')
+			.replace(/\\'/g, "'")
+			.replace(/\\\\/g, '\\')
+			.replace(/\\\//g, '/');
 	}
 
 	// For each supported escape sequence, replace according to the escapeMap
-	// If both unescaped and escaped found for a char, default to unescaped
-	const specials = [
-		{ char: '\n', real: '\n', unescaped: /(?<!\\)\\n/g, escaped: /\\\\n/g },
-		{ char: '\r', real: '\r', unescaped: /(?<!\\)\\r/g, escaped: /\\\\r/g },
-		{ char: '\t', real: '\t', unescaped: /(?<!\\)\\t/g, escaped: /\\\\t/g },
-		{ char: '"', real: '"', unescaped: /(?<!\\)\"/g, escaped: /\\\"/g },
-		{ char: "'", real: "'", unescaped: /(?<!\\)\\'/g, escaped: /\\\\'/g },
-		{ char: '\\', real: '\\', unescaped: /(?<!\\)\\\\/g, escaped: /\\\\\\/g },
-		{ char: '\/', real: '/', unescaped: /(?<!\\)\\\//g, escaped: /\\\\\//g },
-	];
 	let result = input;
-	for (const { char, real, unescaped, escaped } of specials) {
-		const style = escapeMap[real];
-		if (style === 'escaped') {
-			// Only replace escaped backslash escapes
-			result = result.replace(escaped, real);
-		} else if (style === 'unescaped') {
-			// Only replace unescaped backslash escapes
-			result = result.replace(unescaped, real);
-		} else if (style === undefined) {
-			// Not found in original, try both (default to unescaped)
-			result = result.replace(unescaped, real);
-		} else {
-			// If both unescaped and escaped found, default to unescaped
-			result = result.replace(unescaped, real);
-		}
+	
+	// Process in specific order to avoid conflicts
+	// Handle newlines
+	const nlStyle = escapeMap['\n'];
+	if (nlStyle === 'double-escaped') {
+		result = result.replace(/\\\\n/g, '\\n');
+	} else if (nlStyle === 'single-escaped') {
+		result = result.replace(/\\n/g, '\n');
 	}
+	
+	// Handle carriage returns
+	const crStyle = escapeMap['\r'];
+	if (crStyle === 'double-escaped') {
+		result = result.replace(/\\\\r/g, '\\r');
+	} else if (crStyle === 'single-escaped') {
+		result = result.replace(/\\r/g, '\r');
+	}
+	
+	// Handle tabs
+	const tabStyle = escapeMap['\t'];
+	if (tabStyle === 'double-escaped') {
+		result = result.replace(/\\\\t/g, '\\t');
+	} else if (tabStyle === 'single-escaped') {
+		result = result.replace(/\\t/g, '\t');
+	}
+	
+	// Handle slashes
+	const slashStyle = escapeMap['/'];
+	if (slashStyle === 'double-escaped') {
+		result = result.replace(/\\\\\//g, '\\/');
+	} else if (slashStyle === 'single-escaped') {
+		result = result.replace(/\\\//g, '/');
+	}
+	
+	// Handle backslashes (must be done carefully to avoid affecting other escapes)
+	const backslashStyle = escapeMap['\\'];
+	if (backslashStyle === 'double-escaped') {
+		// Convert remaining \\\\ to \\ (but we need to be careful about what's left)
+		result = result.replace(/\\\\\\\\/g, '\\\\');
+	} else if (backslashStyle === 'single-escaped') {
+		// Convert remaining \\ to \ (but we need to be careful about what's left)
+		result = result.replace(/\\\\/g, '\\');
+	}
+	
+	// Handle quotes
+	const quoteStyle = escapeMap['"'];
+	if (quoteStyle === 'double-escaped') {
+		result = result.replace(/\\\\"/g, '\\"');
+	} else if (quoteStyle === 'single-escaped') {
+		result = result.replace(/\\"/g, '"');
+	}
+	
+	const singleQuoteStyle = escapeMap["'"];
+	if (singleQuoteStyle === 'double-escaped') {
+		result = result.replace(/\\\\'/g, "\\'");
+	} else if (singleQuoteStyle === 'single-escaped') {
+		result = result.replace(/\\'/g, "'");
+	}
+	
 	return result;
 }
 
@@ -425,8 +506,8 @@ export function activate(context: vscode.ExtensionContext) {
 			let editor = vscode.window.activeTextEditor;
 			let originalString = '';
 			let stringRange: vscode.Range | undefined;
-			let escapeStyle: 'unescaped' | 'escaped' = 'unescaped';
-			let escapeMap: Record<string, 'unescaped' | 'escaped'> = {};
+			let escapeStyle: 'single-escaped' | 'double-escaped' = 'single-escaped';
+			let escapeMap: Record<string, 'single-escaped' | 'double-escaped'> = {};
 			let hoverLine: number | undefined = undefined;
 			let hoverCharacter: number | undefined = undefined;
 			if (arg && typeof arg === 'object' && arg.stringContent !== undefined && typeof arg.hoverLine === 'number' && typeof arg.hoverCharacter === 'number') {
@@ -446,7 +527,8 @@ export function activate(context: vscode.ExtensionContext) {
 						stringRange = new vscode.Range(new vscode.Position(hoverLine, idx), new vscode.Position(hoverLine, idx + originalString.length));
 					}
 				}
-				escapeStyle = /\\[ntr"'\\/]/.test(originalString) ? 'escaped' : 'unescaped';
+				// Determine escape style - check if it has double-escaped sequences
+				escapeStyle = /\\\\[ntr"'\\/]/.test(originalString) ? 'double-escaped' : 'single-escaped';
 				escapeMap = buildEscapeStyleMap(originalString);
 			} else if (typeof arg === 'string') {
 				originalString = arg;
@@ -458,14 +540,16 @@ export function activate(context: vscode.ExtensionContext) {
 						escapeMap = buildEscapeStyleMap(res.stringContent);
 					}
 				}
-				escapeStyle = /\\[ntr"'\\/]/.test(originalString) ? 'escaped' : 'unescaped';
+				// Determine escape style - check if it has double-escaped sequences
+				escapeStyle = /\\\\[ntr"'\\/]/.test(originalString) ? 'double-escaped' : 'single-escaped';
 			} else if (!arg && editor) {
 				const position = editor.selection.active;
 				const res = isPositionInString(editor.document, position);
 				if (res.isInString && res.stringRange) {
 					originalString = res.stringContent;
 					stringRange = res.stringRange;
-					escapeStyle = /\\[ntr"'\\/]/.test(res.stringContent) ? 'escaped' : 'unescaped';
+					// Determine escape style - check if it has double-escaped sequences
+					escapeStyle = /\\\\[ntr"'\\/]/.test(res.stringContent) ? 'double-escaped' : 'single-escaped';
 					escapeMap = buildEscapeStyleMap(res.stringContent);
 				}
 			}
@@ -535,10 +619,18 @@ export function activate(context: vscode.ExtensionContext) {
 	// When the temp file is saved, immediately take over the change into the original file as string
 	vscode.workspace.onDidSaveTextDocument(async (doc) => {
 		const ctx = (globalThis as any)._escapeBusterEditContext;
-		if (!ctx || !ctx.tempFilePath) return;
+		if (!ctx || !ctx.tempFilePath) {
+			return;
+		}
 		let docPath = doc.uri.fsPath;
-		try { docPath = fs.realpathSync(docPath); } catch { }
-		if (docPath !== ctx.tempFilePath) return;
+		try { 
+			docPath = fs.realpathSync(docPath); 
+		} catch { 
+			// Ignore error
+		}
+		if (docPath !== ctx.tempFilePath) {
+			return;
+		}
 		const editedText = doc.getText();
 		// Only update if the edited text is different from the original string
 		let stringRange = ctx.stringRange;
@@ -554,7 +646,9 @@ export function activate(context: vscode.ExtensionContext) {
 				// Search all occurrences in the line
 				while (true) {
 					idx = lineText.indexOf(searchStr, idx + 1);
-					if (idx === -1) break;
+					if (idx === -1) {
+						break;
+					}
 					// If hoverCharacter is within this occurrence, use it
 					if (ctx.hoverCharacter >= idx && ctx.hoverCharacter <= idx + searchStr.length) {
 						const start = new vscode.Position(ctx.hoverLine, idx);
@@ -605,7 +699,9 @@ export function activate(context: vscode.ExtensionContext) {
 	// On tab close, delete the temp file and clear context. Only update original if file was saved.
 	vscode.window.onDidChangeVisibleTextEditors(async (editors) => {
 		const ctx = (globalThis as any)._escapeBusterEditContext;
-		if (!ctx || !ctx.tempFilePath) return;
+		if (!ctx || !ctx.tempFilePath) {
+			return;
+		}
 		// If no open text document is showing the temp file, take over the string and delete the file/folder
 		const stillOpen = vscode.workspace.textDocuments.some(d => d.uri.fsPath === ctx.tempFilePath);
 		if (!stillOpen) {
@@ -657,37 +753,51 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	// Utility: Convert multi-line text to escaped string
-	function multiLineToEscapedString(text: string, style: 'unescaped' | 'escaped', escapeMap?: Record<string, 'unescaped' | 'escaped'>, original?: string): string {
-		// For robust per-character escape, process the string char by char, using escapeMap if provided
+	/**
+	 * Convert multi-line text back to an escaped string for insertion into source code.
+	 * This is the inverse operation of parseEscapeSequences.
+	 * 
+	 * Examples:
+	 * - Input: "hello\nworld" (actual newline), style: 'single-escaped' -> Output: "hello\\nworld"
+	 * - Input: "url/path" (actual slash), style: 'single-escaped' -> Output: "url\\/path"
+	 * - Input: "text\\n" (literal \n), style: 'double-escaped' -> Output: "text\\\\n"
+	 * 
+	 * @param text The actual text content (with real newlines, tabs, etc.)
+	 * @param style Default escape style to use
+	 * @param escapeMap Per-character escape style overrides
+	 * @param original The original source string (unused in current implementation)
+	 */
+	function multiLineToEscapedString(text: string, style: 'single-escaped' | 'double-escaped', escapeMap?: Record<string, 'single-escaped' | 'double-escaped'>, original?: string): string {
+		// Process the string character by character, using escapeMap for per-character style
 		let result = '';
 		for (let i = 0; i < text.length; i++) {
 			const ch = text[i];
-			let origStyle = style;
+			let charStyle = style;
 			if (escapeMap && escapeMap[ch]) {
-				origStyle = escapeMap[ch];
+				charStyle = escapeMap[ch];
 			}
 			switch (ch) {
 				case '\n':
-					result += origStyle === 'escaped' ? '\\\\n' : '\\n';
+					// single-escaped: \n, double-escaped: \\n
+					result += charStyle === 'double-escaped' ? '\\\\n' : '\\n';
 					break;
 				case '\r':
-					result += origStyle === 'escaped' ? '\\\\r' : '\\r';
+					result += charStyle === 'double-escaped' ? '\\\\r' : '\\r';
 					break;
 				case '\t':
-					result += origStyle === 'escaped' ? '\\\\t' : '\\t';
+					result += charStyle === 'double-escaped' ? '\\\\t' : '\\t';
 					break;
 				case '"':
-					result += origStyle === 'escaped' ? '\\"' : '"';
+					result += charStyle === 'double-escaped' ? '\\\\"' : '\\"';
 					break;
 				case "'":
-					result += origStyle === 'escaped' ? "\\'" : "'";
+					result += charStyle === 'double-escaped' ? "\\\\'" : "\\'";
 					break;
 				case '\\':
-					result += origStyle === 'escaped' ? '\\\\' : '\\';
+					result += charStyle === 'double-escaped' ? '\\\\\\\\' : '\\\\';
 					break;
 				case '/':
-					result += origStyle === 'escaped' ? '\\/' : '/';
+					result += charStyle === 'double-escaped' ? '\\\\/' : '\\/';
 					break;
 				default:
 					result += ch;
