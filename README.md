@@ -6,9 +6,11 @@ Escape Buster is a VS Code extension that provides a convenient way to preview s
 
 - **Preview on Hover**: Instantly see the expanded content of strings with escape sequences when hovering over them
 - **Dedicated Preview Panel**: Open strings in a full preview panel for better viewing and interaction
+- **Multi-line Editor**: Edit escaped strings in a dedicated editor with automatic conversion to/from escape sequences
 - **Syntax Highlighting**: Automatic language detection and syntax highlighting for code snippets
 - **Theme Compatibility**: Consistent syntax highlighting in both light and dark themes
 - **Copy to Clipboard**: Easily copy the expanded content with a single click
+
 
 ![screenshot](image/README/screen-shot.png)
 
